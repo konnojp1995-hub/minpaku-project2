@@ -1,0 +1,10 @@
+# Streamlit Community Cloud用のシステムパッケージ定義ファイル
+# このファイルは、システムレベルのパッケージが必要な場合に使用します
+# 現在は不要ですが、将来的に必要な場合に備えて作成しています
+
+# 例：Tesseract OCRが必要な場合
+# tesseract-ocr
+
+# 例：他のシステムパッケージが必要な場合
+# python3-dev
+# build-essential

@@ -1,0 +1,139 @@
+{
+  "zoning_rules": {
+    "第一種低層住居専用地域": {
+      "ryokan": "不可",
+      "minpaku": "不可",
+      "tokku_minpaku": "要確認",
+      "notes": "低層住居専用地域では民泊は基本的に不可"
+    },
+    "第二種低層住居専用地域": {
+      "ryokan": "不可",
+      "minpaku": "不可",
+      "tokku_minpaku": "要確認",
+      "notes": "低層住居専用地域では民泊は基本的に不可"
+    },
+    "第一種中高層住居専用地域": {
+      "ryokan": "不可",
+      "minpaku": "要確認",
+      "tokku_minpaku": "要確認",
+      "notes": "中高層住居専用地域では条件付きで民泊可能"
+    },
+    "第二種中高層住居専用地域": {
+      "ryokan": "不可",
+      "minpaku": "要確認",
+      "tokku_minpaku": "要確認",
+      "notes": "中高層住居専用地域では条件付きで民泊可能"
+    },
+    "第一種住居地域": {
+      "ryokan": "要確認",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "住居地域では民泊は可能"
+    },
+    "第二種住居地域": {
+      "ryokan": "要確認",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "住居地域では民泊は可能"
+    },
+    "準住居地域": {
+      "ryokan": "要確認",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "準住居地域では民泊は可能"
+    },
+    "近隣商業地域": {
+      "ryokan": "可能",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "商業地域では民泊・旅館業ともに可能"
+    },
+    "商業地域": {
+      "ryokan": "可能",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "商業地域では民泊・旅館業ともに可能"
+    },
+    "準工業地域": {
+      "ryokan": "要確認",
+      "minpaku": "可能",
+      "tokku_minpaku": "可能",
+      "notes": "準工業地域では民泊は可能"
+    },
+    "工業地域": {
+      "ryokan": "不可",
+      "minpaku": "不可",
+      "tokku_minpaku": "不可",
+      "notes": "工業地域では民泊・旅館業ともに不可"
+    },
+    "工業専用地域": {
+      "ryokan": "不可",
+      "minpaku": "不可",
+      "tokku_minpaku": "不可",
+      "notes": "工業専用地域では民泊・旅館業ともに不可"
+    }
+  },
+  "building_standards": {
+    "接道義務": {
+      "description": "建築物は幅員4m以上の道路に2m以上接していなければならない",
+      "required": true,
+      "check_items": [
+        "接道幅員4m以上",
+        "接道長さ2m以上",
+        "道路の種類確認（建築基準法上の道路）"
+      ]
+    },
+    "避難経路": {
+      "description": "避難経路を2箇所以上確保する必要がある",
+      "required": true,
+      "check_items": [
+        "避難経路1：主要出入口",
+        "避難経路2：非常用出入口",
+        "避難経路の幅員確保",
+        "避難経路の障害物除去"
+      ]
+    },
+    "消防設備": {
+      "description": "消防法に基づく設備設置が必要",
+      "required": true,
+      "check_items": [
+        "自動火災報知設備",
+        "消火器設置",
+        "避難誘導灯",
+        "非常放送設備（10人以上の場合）"
+      ]
+    },
+    "建築確認": {
+      "description": "建築基準法に基づく確認申請が必要",
+      "required": true,
+      "check_items": [
+        "建築確認申請",
+        "完了検査申請",
+        "用途変更届出",
+        "構造計算書"
+      ]
+    }
+  },
+  "minpaku_requirements": {
+    "宿泊者数制限": {
+      "description": "民泊新法による宿泊者数制限",
+      "max_guests": 10,
+      "notes": "1日あたりの宿泊者数上限"
+    },
+    "営業日数制限": {
+      "description": "年間営業日数制限",
+      "max_days": 180,
+      "notes": "年間180日まで営業可能"
+    },
+    "届出義務": {
+      "description": "民泊新法による届出義務",
+      "required": true,
+      "check_items": [
+        "住宅宿泊事業届出",
+        "住宅宿泊管理業者登録",
+        "住宅宿泊仲介業者登録"
+      ]
+    }
+  }
+}
+
