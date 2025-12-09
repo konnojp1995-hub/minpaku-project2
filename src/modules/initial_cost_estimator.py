@@ -27,6 +27,37 @@ class InitialCostEstimator:
                 self.law_checker = LawChecker(gemini_api_key=gemini_api_key)
             except Exception as e:
                 log_error(f"LawCheckerの初期化に失敗: {str(e)}")
+
+    def _parse_cost_value(self, raw_value, rent_value: int = 0) -> int:
+        """
+        金額または「●ヶ月」表記を数値に変換
+        
+        Args:
+            raw_value: 金額または「●ヶ月」表記（文字列または数値）
+            rent_value: 月額家賃（「●ヶ月」表記の場合に使用）
+        
+        Returns:
+            整数の金額（変換できない場合は0）
+        """
+        if raw_value is None:
+            return 0
+        try:
+            # すでに数値の場合
+            if isinstance(raw_value, (int, float)):
+                return int(raw_value)
+            value_str = str(raw_value).strip()
+            # 例: "2ヶ月", "1.5か月", "3ヵ月", "2月分"
+            month_match = re.search(r'([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', value_str)
+            if month_match and rent_value > 0:
+                months = float(month_match.group(1))
+                return int(round(months * rent_value))
+            # 数値のみ
+            digits_match = re.search(r'[0-9,]+', value_str)
+            if digits_match:
+                return int(digits_match.group().replace(',', ''))
+        except Exception:
+            pass
+        return 0
     
     def extract_initial_costs_from_ocr(self, extracted_text: str) -> Dict:
         """
@@ -48,6 +79,14 @@ class InitialCostEstimator:
             }
         
         # Geminiを使ってOCRテキストから初期費用を抽出
+        rent_value = 0
+        try:
+            rent_data = self.extract_rent_from_ocr(extracted_text)
+            # 家賃と管理費を合算（家賃が0でも管理費があれば加算）
+            rent_value = (rent_data.get('rent', 0) or 0) + (rent_data.get('management_fee', 0) or 0)
+        except Exception:
+            rent_value = 0
+
         if self.law_checker and self.law_checker.gemini_available:
             prompt = f"""以下の不動産広告のテキストから、初期費用に関する項目を抽出してJSON形式で返してください。
 各項目が見つからない場合は、該当する項目を0として返してください。
@@ -81,19 +120,19 @@ JSON形式で、以下の構造で返してください:
                 if json_match:
                     cost_data = json.loads(json_match.group())
                     return {
-                        'deposit': int(cost_data.get('敷金', 0) or 0),
-                        'key_money': int(cost_data.get('礼金', 0) or 0),
-                        'brokerage_fee': int(cost_data.get('仲介手数料', 0) or 0),
-                        'guarantee_company': int(cost_data.get('保証会社', 0) or 0),
-                        'fire_insurance': int(cost_data.get('火災保険', 0) or 0)
+                        'deposit': self._parse_cost_value(cost_data.get('敷金', 0), rent_value),
+                        'key_money': self._parse_cost_value(cost_data.get('礼金', 0), rent_value),
+                        'brokerage_fee': self._parse_cost_value(cost_data.get('仲介手数料', 0), rent_value),
+                        'guarantee_company': self._parse_cost_value(cost_data.get('保証会社', 0), rent_value),
+                        'fire_insurance': self._parse_cost_value(cost_data.get('火災保険', 0), rent_value)
                     }
             except Exception as e:
                 log_error(f"OCRテキストからの初期費用抽出エラー: {str(e)}")
         
         # フォールバック: 正規表現で抽出を試みる
-        return self._extract_costs_with_regex(extracted_text)
+        return self._extract_costs_with_regex(extracted_text, rent_value)
     
-    def _extract_costs_with_regex(self, text: str) -> Dict:
+    def _extract_costs_with_regex(self, text: str, rent_value: int = 0) -> Dict:
         """
         正規表現を使って初期費用を抽出（フォールバック）
         
@@ -125,6 +164,14 @@ JSON形式で、以下の構造で返してください:
                     break
                 except:
                     pass
+        if result['deposit'] == 0 and rent_value > 0:
+            month_match = re.search(r'敷金[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
+            if month_match:
+                try:
+                    months = float(month_match.group(1))
+                    result['deposit'] = int(round(months * rent_value))
+                except:
+                    pass
         
         # 礼金のパターン
         key_money_patterns = [
@@ -138,6 +185,14 @@ JSON形式で、以下の構造で返してください:
                 try:
                     result['key_money'] = int(match.group(1).replace(',', ''))
                     break
+                except:
+                    pass
+        if result['key_money'] == 0 and rent_value > 0:
+            month_match = re.search(r'礼金[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
+            if month_match:
+                try:
+                    months = float(month_match.group(1))
+                    result['key_money'] = int(round(months * rent_value))
                 except:
                     pass
         
@@ -154,6 +209,14 @@ JSON形式で、以下の構造で返してください:
                     break
                 except:
                     pass
+        if result['brokerage_fee'] == 0 and rent_value > 0:
+            month_match = re.search(r'仲介[手数料]*[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
+            if month_match:
+                try:
+                    months = float(month_match.group(1))
+                    result['brokerage_fee'] = int(round(months * rent_value))
+                except:
+                    pass
         
         # 保証会社のパターン
         guarantee_patterns = [
@@ -166,6 +229,14 @@ JSON形式で、以下の構造で返してください:
                 try:
                     result['guarantee_company'] = int(match.group(1).replace(',', ''))
                     break
+                except:
+                    pass
+        if result['guarantee_company'] == 0 and rent_value > 0:
+            month_match = re.search(r'保証会社[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
+            if month_match:
+                try:
+                    months = float(month_match.group(1))
+                    result['guarantee_company'] = int(round(months * rent_value))
                 except:
                     pass
         
