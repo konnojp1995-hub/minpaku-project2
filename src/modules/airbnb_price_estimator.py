@@ -427,7 +427,7 @@ class AirbnbPriceEstimator:
 
 3. 宿泊人数：{occupancy}人（物件面積から自動推定：面積(m²) ÷ 12、1人未満は1人、上限10人）
 
-4. 物件タイプ：すべての物件タイプを対象とします（まるまり貸切、プライベートルーム、シェアルームなど、すべてのタイプを含む）
+    4. 物件タイプ：すべての物件タイプを対象とします（まるまり貸切、プライベートルーム、シェアルームなど、すべてのタイプを含む）
 
 5. 除外：宿泊人数が物件規模に対して過剰または過少な物件
 
@@ -437,7 +437,7 @@ class AirbnbPriceEstimator:
     推定宿泊人数 = round( 面積(m²) ÷ 12 )
 - 補正：1人未満は1人に繰り上げ、上限は10人
 - 取得できない場合は「表示されているホストの定員（listed capacity）」を利用する
-- 対象フィルタ：調査条件（{occupancy}名）に近い物件のみ採用（listed capacity または推定宿泊人数が ±1 内を優先）
+- 対象フィルタ：調査条件（{occupancy}名）に近い物件のみ採用（listed capacity または推定宿泊人数が ±2 内を優先）
 
 ## 抽出ルール（必須・厳格に遵守）
 
@@ -561,8 +561,8 @@ class AirbnbPriceEstimator:
 
 **重要：JSONのみを返してください。説明文や補足は不要です。2つのJSON配列/オブジェクトを順番に返してください。**"""
         
-        # 再検索ロジック: 町名レベル → 市または区レベルの2段階で検索
-        max_retries = 2  # 町名レベル + 市または区レベルの2回試行
+        # 再検索ロジック: 町名レベル → 市または区レベル → 広域(都道府県/全国) の最大3段階で検索
+        max_retries = 3
         retry_count = 0
         result = None
         property_list = None
@@ -576,15 +576,22 @@ class AirbnbPriceEstimator:
             while retry_count < max_retries:
                 try:
                     if retry_count == 0:
-                        # 1回目: 町名レベルで検索
-                        search_address = address_to_cho
+                        # 1回目: 町名レベル（なければ市区町村、さらに全住所）
+                        search_address = address_to_cho or address_to_city_or_ward or address or "日本"
                         search_level = "町名"
                         log_info(f"Airbnb価格推定を開始（{search_level}レベル）: 住所={search_address}, 宿泊人数={occupancy}人")
-                    else:
-                        # 2回目: 市または区レベルで再検索
-                        search_address = address_to_city_or_ward
+                    elif retry_count == 1:
+                        # 2回目: 市または区レベル（なければ全住所）
+                        search_address = address_to_city_or_ward or address or "日本"
                         search_level = "市または区"
                         log_info(f"リスティングが見つかりませんでした。検索範囲を拡大します（{search_level}レベル）: 住所={search_address}")
+                    else:
+                        # 3回目: 広域（都道府県または全国）
+                        # addressから都道府県を推定（単純に先頭の県/都/府/道を抽出）
+                        prefecture_match = re.search(r'(北海道|.+?[都道府県])', address or '')
+                        search_address = prefecture_match.group(1) if prefecture_match else "日本"
+                        search_level = "広域"
+                        log_info(f"さらに検索範囲を拡大します（{search_level}レベル）: 住所={search_address}")
                     
                     prompt = create_search_prompt(search_address, search_level)
                     
