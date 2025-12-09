@@ -529,9 +529,21 @@ def chat_bot_tab():
                     st.write("")
                     st.write(f"**抽出された住所**: {address}")
                     if raw_texts:
+                        # シンプルなKV形式に整形して表示（<項目名>: <値>）
+                        def _format_ocr_line(line: str) -> str:
+                            # 「項目: 値」形式を優先
+                            m1 = re.match(r'^\s*([^\s:：]+)\s*[：:]\s*(.+)$', line)
+                            if m1:
+                                return f"{m1.group(1)}: {m1.group(2).strip()}"
+                            # スペース区切りを「:」に置き換えて表示
+                            m2 = re.match(r'^\s*([^\s]+)\s+(.+)$', line)
+                            if m2:
+                                return f"{m2.group(1)}: {m2.group(2).strip()}"
+                            return line.strip()
+
+                        formatted_texts = [_format_ocr_line(t) for t in raw_texts]
                         with st.expander("📝 抽出されたテキストを表示"):
-                            for text in raw_texts:
-                                st.text(text)
+                            st.text("\n".join(formatted_texts))
                 
                 st.session_state['chat_history'].append({
                     'role': 'assistant',
