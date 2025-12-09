@@ -88,8 +88,15 @@ class AirbnbPriceEstimator:
                 self.gemini_model_name = 'gemini-2.0-flash'
                 log_info("Geminiモデルを初期化しました: gemini-2.0-flash")
             except Exception as e:
+                error_str = str(e)
+                # 429エラー（クォータ超過）の場合は即座に停止
+                if "429" in error_str or "quota" in error_str.lower():
+                    self.gemini_available = False
+                    self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                    log_error(self.gemini_init_error)
+                    return (f"エラー: {self.gemini_init_error}", None)
                 self.gemini_available = False
-                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}"
+                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {error_str}"
                 log_error(self.gemini_init_error)
                 return (f"エラー: {self.gemini_init_error}", None)
         
@@ -135,9 +142,12 @@ class AirbnbPriceEstimator:
                         
                 except Exception as e:
                     error_str = str(e)
-                    # クォータ制限エラーの場合は再試行しない
+                    # クォータ制限エラー（429）の場合は即座に停止し、後続の呼び出しを防ぐ
                     if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
-                        raise  # エラーを再発生させて、呼び出し元で処理
+                        self.gemini_available = False
+                        self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                        log_error(self.gemini_init_error)
+                        return (f"エラー: {self.gemini_init_error}", None)
                     log_warning(f"Google検索ツールの設定に失敗しました。通常モードで実行します: {error_str}")
                     response_obj = self.gemini_model.generate_content(prompt)
             else:
@@ -205,11 +215,16 @@ class AirbnbPriceEstimator:
             else:
                 return ("応答を取得できませんでした", response_obj)
         except Exception as e:
-            error_msg = f"Gemini API呼び出しエラー: {str(e)}"
-            # 429エラー（クォータ超過）の場合は、より分かりやすいメッセージを表示
-            if "429" in str(e) or "quota" in str(e).lower() or "rate" in str(e).lower():
-                error_msg = f"Gemini APIのクォータ制限に達しました。無料プランでは1日50リクエストまでです。しばらく待ってから再度お試しください。詳細: {str(e)}"
-                log_warning(error_msg)
+            error_str = str(e)
+            # 429エラー（クォータ超過）の場合は即座に停止し、後続の呼び出しを防ぐ
+            if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                self.gemini_available = False
+                self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                error_msg = f"Gemini APIのクォータ制限に達しました。無料プランでは1日50リクエストまでです。しばらく待ってから再度お試しください。"
+                log_error(error_msg)
+                return (error_msg, None)
+            error_msg = f"Gemini API呼び出しエラー: {error_str}"
+            log_error(error_msg)
             else:
                 log_error(error_msg)
             return (f"エラー: {error_msg}", None)

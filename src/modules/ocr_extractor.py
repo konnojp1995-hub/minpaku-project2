@@ -125,7 +125,14 @@ class OCRAddressExtractor:
                 self.gemini_model_name = 'gemini-2.0-flash'
                 log_info("Geminiクライアントを初期化しました: gemini-2.0-flash")
             except Exception as e:
-                log_error(f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}")
+                error_str = str(e)
+                # 429エラー（クォータ超過）の場合は即座に停止
+                if "429" in error_str or "quota" in error_str.lower():
+                    self.gemini_available = False
+                    self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                    log_error(self.gemini_init_error)
+                    return []
+                log_error(f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {error_str}")
                 return []
         
         try:
@@ -178,9 +185,12 @@ class OCRAddressExtractor:
         except Exception as e:
             error_message = str(e)
             
-            # クォータ制限エラーの場合
+            # クォータ制限エラー（429）の場合は即座に停止し、後続の呼び出しを防ぐ
             if "quota" in error_message.lower() or "429" in error_message:
-                log_error("Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。")
+                self.gemini_available = False
+                self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                log_error(self.gemini_init_error)
+                return []
             # その他のエラー
             else:
                 log_error(f"Gemini OCR処理でエラーが発生しました: {error_message}")

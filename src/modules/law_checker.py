@@ -85,19 +85,37 @@ class LawChecker:
                 self.gemini_model_name = 'gemini-2.0-flash'
                 log_info("Geminiモデルを初期化しました: gemini-2.0-flash")
             except Exception as e:
+                error_str = str(e)
+                # 429エラー（クォータ超過）の場合は即座に停止
+                if "429" in error_str or "quota" in error_str.lower():
+                    self.gemini_available = False
+                    self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                    log_error(self.gemini_init_error)
+                    return f"エラー: {self.gemini_init_error}"
                 self.gemini_available = False
-                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}"
+                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {error_str}"
                 log_error(self.gemini_init_error)
                 return f"エラー: {self.gemini_init_error}"
         
         try:
+            # 429エラーが既に発生している場合は即座にエラーを返す
+            if not self.gemini_available:
+                return f"エラー: {self.gemini_init_error}"
+            
             response = self.gemini_model.generate_content(prompt)
             if response and response.text:
                 return response.text.strip()
             return "応答を取得できませんでした"
         except Exception as e:
-            log_error(f"Gemini API呼び出しエラー: {str(e)}")
-            return f"エラー: {str(e)}"
+            error_str = str(e)
+            # 429エラー（クォータ超過）の場合は即座に停止し、後続の呼び出しを防ぐ
+            if "429" in error_str or "quota" in error_str.lower():
+                self.gemini_available = False
+                self.gemini_init_error = "Gemini APIのクォータ制限に達しています。しばらく待ってから再試行してください。"
+                log_error(self.gemini_init_error)
+                return f"エラー: {self.gemini_init_error}"
+            log_error(f"Gemini API呼び出しエラー: {error_str}")
+            return f"エラー: {error_str}"
     
     def extract_property_info(self, extracted_text: str) -> Dict:
         """
