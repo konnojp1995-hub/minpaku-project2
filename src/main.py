@@ -441,7 +441,7 @@ def chat_bot_tab():
             image = Image.open(uploaded_file)
             with st.chat_message("assistant"):
                 st.write("📷 アップロードされた画像を確認してください。")
-                st.image(image, caption="アップロードされた画像", width=None)
+                st.image(image, caption="アップロードされた画像")
                 st.session_state['uploaded_image'] = image
         else:
             with st.chat_message("assistant"):
