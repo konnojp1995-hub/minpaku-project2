@@ -225,8 +225,7 @@ class AirbnbPriceEstimator:
                 return (error_msg, None)
             error_msg = f"Gemini API呼び出しエラー: {error_str}"
             log_error(error_msg)
-            else:
-                log_error(error_msg)
+            return (error_msg, None)
             return (f"エラー: {error_msg}", None)
     
     def extract_address_to_cho(self, address: str) -> str:
