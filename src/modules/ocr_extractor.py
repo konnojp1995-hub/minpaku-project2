@@ -4,12 +4,16 @@ OCR住所抽出モジュール
 """
 import os
 import re
-import cv2
 import numpy as np
 from PIL import Image
 from typing import List, Dict, Optional
 import streamlit as st
 from .utils import validate_file_size, log_error, log_info, log_warning
+
+# cv2のインポートは削除（Streamlit Cloudでネイティブライブラリの読み込みに失敗するため）
+# すべての画像処理はPIL/numpyで行う
+CV2_AVAILABLE = False
+cv2 = None
 
 # OpenAIは使用しない（Geminiのみ使用）
 
@@ -59,130 +63,11 @@ class OCRAddressExtractor:
                     log_info(f"google-generativeai バージョン: {libver}")
                 except Exception:
                     pass
-                genai.configure(api_key=self.gemini_api_key)
-                
-                # 利用可能なモデルを確認して適切なモデルを選択
-                model_name = self.gemini_model_name or 'gemini-1.5-pro'
-                try:
-                    log_info("Gemini利用可能モデルを検索中...")
-                    # まず利用可能なモデル一覧を取得（タイムアウト設定）
-                    try:
-                        import socket
-                        socket.setdefaulttimeout(30)  # 30秒タイムアウト
-                        models = list(genai.list_models())
-                        socket.setdefaulttimeout(None)  # タイムアウトをリセット
-                        log_info(f"APIから取得したモデル総数: {len(models)}")
-                    except Exception as timeout_error:
-                        socket.setdefaulttimeout(None)  # タイムアウトをリセット
-                        if "timeout" in str(timeout_error).lower() or "Timeout" in str(timeout_error):
-                            log_warning("モデル一覧取得がタイムアウトしました。デフォルトモデルを使用します。")
-                            raise timeout_error
-                        else:
-                            raise
-                    
-                    available_models = []
-                    vision_models = []
-                    generate_content_models = []
-                    
-                    for model in models:
-                        name = getattr(model, 'name', '')
-                        methods = getattr(model, 'supported_generation_methods', [])
-                        
-                        # 各条件をチェック
-                        has_generate_content = 'generateContent' in methods
-                        # 新しいGeminiモデルは vision という文字列を含まない場合がある
-                        # 代わりに generateContent が利用可能で、画像処理が可能なモデルを探す
-                        has_vision_capability = has_generate_content and (
-                            'vision' in name.lower() or 
-                            'pro' in name.lower() or 
-                            'flash' in name.lower()
-                        )
-                        
-                        if has_generate_content:
-                            generate_content_models.append(name)
-                        if has_vision_capability:
-                            vision_models.append(name)
-                        if has_generate_content and has_vision_capability:
-                            available_models.append(name)
-                    
-                    log_info(f"generateContent対応モデル: {len(generate_content_models)}件")
-                    log_info(f"vision対応モデル: {len(vision_models)}件")
-                    log_info(f"両方対応モデル: {len(available_models)}件")
-                    
-                    if available_models:
-                        log_info(f"利用可能なGeminiモデル: {available_models}")
-                    else:
-                        log_warning("generateContentとvisionの両方に対応するモデルが見つかりません")
-                        if generate_content_models:
-                            log_info(f"generateContentのみ対応: {generate_content_models[:5]}...")
-                        if vision_models:
-                            log_info(f"visionのみ対応: {vision_models[:5]}...")
-                    
-                    # 優先順位でモデルを選択（軽量モデルを優先）
-                    preferred_models = [
-                        'gemini-2.5-flash',  # 軽量で高速
-                        'gemini-2.0-flash',  # より軽量
-                        'gemini-flash-latest',  # 最新の軽量版
-                        'gemini-2.5-pro',   # 高機能だが重い
-                        'gemini-1.5-pro',
-                        'gemini-1.5-flash', 
-                        'gemini-1.0-pro-vision',
-                        'gemini-pro-vision'
-                    ]
-                    
-                    selected_model = None
-                    for pref in preferred_models:
-                        for available in available_models:
-                            if pref in available:
-                                selected_model = available
-                                break
-                        if selected_model:
-                            break
-                    
-                    # 利用可能なモデルがない場合は、generateContent対応モデルから選択
-                    if not selected_model and generate_content_models:
-                        # 最新のモデルを優先（pro > flash > その他）
-                        for pref in ['pro', 'flash']:
-                            for model in generate_content_models:
-                                if pref in model.lower():
-                                    selected_model = model
-                                    break
-                            if selected_model:
-                                break
-                        
-                        if not selected_model:
-                            selected_model = generate_content_models[0]
-                        log_info(f"generateContent対応モデルから選択: {selected_model}")
-                    
-                    if selected_model:
-                        model_name = selected_model
-                        log_info(f"選択されたGeminiモデル: {model_name}")
-                    else:
-                        log_error("利用可能なGeminiモデルが見つかりません。デフォルトモデルを使用します。")
-                        log_info("デフォルトモデルで初期化を試行します...")
-                        
-                except Exception as list_error:
-                    log_error(f"モデル一覧取得に失敗: {str(list_error)}")
-                    log_info("デフォルトモデルを使用して初期化を続行します...")
-                
-                # モデル初期化を試行
-                try:
-                    self.gemini_model = genai.GenerativeModel(model_name)
-                    log_info(f"Geminiクライアントを初期化しました: {model_name}")
-                except Exception as model_error:
-                    log_error(f"モデル '{model_name}' の初期化に失敗: {str(model_error)}")
-                    # フォールバック: 利用可能なモデルを再試行
-                    if not self.gemini_model_name:  # 環境変数で指定されていない場合のみ
-                        fallback_models = [
-                            'gemini-2.5-flash',  # 軽量で高速
-                            'gemini-2.0-flash',  # より軽量
-                            'gemini-flash-latest',  # 最新の軽量版
-                            'gemini-1.5-flash',  # 安定版軽量
-                            'gemini-2.5-pro',   # 高機能だが重い
-                            'gemini-1.5-pro', 
-                            'gemini-1.0-pro-vision', 
-                            'gemini-pro-vision'
-                        ]
+                # genai.configure()とモデルの初期化は完全に遅延させる（実際にAPIを使用する時まで待つ）
+                # 起動時の不要なAPIコールを完全に避けるため、すべての初期化を遅延
+                self.gemini_model = None
+                # gemini_model_nameは環境変数から取得（既に設定されている）
+                self._gemini_configured = False  # configure()が呼ばれたかどうか
                         for fallback in fallback_models:
                             try:
                                 self.gemini_model = genai.GenerativeModel(fallback)
@@ -229,9 +114,63 @@ class OCRAddressExtractor:
         if not self.gemini_available or not self.gemini_api_key:
             return []
         
+        # cv2が利用できない場合でも処理を続行（画像は既にRGB形式であると仮定）
+        
+        # genai.configure()とモデルの初期化を遅延させる（初回API呼び出し時まで待つ）
+        if not self._gemini_configured:
+            try:
+                genai.configure(api_key=self.gemini_api_key)
+                self._gemini_configured = True
+            except Exception as e:
+                self.gemini_available = False
+                self.gemini_init_error = str(e)
+                log_error(f"Gemini初期化エラー: {str(e)}")
+                return []
+        
+        if self.gemini_model is None:
+            model_name = self.gemini_model_name or 'gemini-1.5-pro'
+            
+            # 優先順位でモデルを選択（軽量モデルを優先、OCR用）
+            preferred_models = [
+                'gemini-1.5-pro',        # 最優先：安定版・高機能・画像処理対応
+                'gemini-1.5-flash',      # 軽量で高速・画像処理対応
+                'gemini-2.5-pro',        # 高機能版
+                'gemini-2.5-flash',      # 軽量版
+                'gemini-2.0-flash',      # 軽量版
+                'gemini-1.0-pro-vision', # 画像処理専用
+                'gemini-pro-vision'      # 画像処理専用
+            ]
+            
+            selected_model = None
+            for preferred in preferred_models:
+                try:
+                    self.gemini_model = genai.GenerativeModel(preferred)
+                    selected_model = preferred
+                    self.gemini_model_name = preferred
+                    log_info(f"Geminiクライアントを初期化しました: {preferred}")
+                    break
+                except Exception as model_error:
+                    # クォータエラーの場合は即座に終了
+                    if "429" in str(model_error) or "quota" in str(model_error).lower():
+                        log_error(f"Gemini APIのクォータ制限に達しています: {str(model_error)}")
+                        return []
+                    continue
+            
+            if not selected_model:
+                # フォールバック: 環境変数で指定されたモデルまたはデフォルトを試行
+                try:
+                    self.gemini_model = genai.GenerativeModel(model_name)
+                    selected_model = model_name
+                    self.gemini_model_name = model_name
+                    log_info(f"デフォルトモデル（{model_name}）を使用して初期化しました")
+                except Exception as e:
+                    log_error(f"モデル '{model_name}' の初期化に失敗: {str(e)}")
+                    return []
+        
         try:
-            # OpenCV画像をPIL画像に変換
-            pil_image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            # numpy配列をPIL画像に変換（画像は既にRGB形式であると仮定）
+            # PILで読み込んだ画像は常にRGB形式なので、そのまま使用
+            pil_image = Image.fromarray(image)
             
             # Geminiに送信するプロンプト
             prompt = """あなたは高精度な日本語OCRアシスタントです。
@@ -554,8 +493,27 @@ class OCRAddressExtractor:
                     'addresses': []
                 }
             
-            # 画像読み込み
-            image = cv2.imread(image_path)
+            # 画像読み込み（PILを使用、cv2は不要）
+            try:
+                # PILで画像を読み込み（RGB形式）
+                pil_image = Image.open(image_path)
+                # RGBAの場合はRGBに変換
+                if pil_image.mode == 'RGBA':
+                    # 白背景に合成してRGBに変換
+                    rgb_image = Image.new('RGB', pil_image.size, (255, 255, 255))
+                    rgb_image.paste(pil_image, mask=pil_image.split()[3] if len(pil_image.split()) == 4 else None)
+                    pil_image = rgb_image
+                elif pil_image.mode != 'RGB':
+                    pil_image = pil_image.convert('RGB')
+                # PIL画像をnumpy配列に変換（RGB形式のまま）
+                image = np.array(pil_image)
+            except Exception as e:
+                log_error(f"画像の読み込みに失敗しました: {str(e)}")
+                return {
+                    'success': False,
+                    'error': f'画像の読み込みに失敗しました: {str(e)}',
+                    'addresses': []
+                }
             if image is None:
                 return {
                     'success': False,
@@ -677,8 +635,17 @@ class OCRAddressExtractor:
         quota_exceeded = False
         
         try:
-            # PIL画像をOpenCV形式に変換
-            image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            # PIL画像をnumpy配列に変換（RGB形式のまま）
+            # RGBAの場合はRGBに変換
+            if pil_image.mode == 'RGBA':
+                # 白背景に合成してRGBに変換
+                rgb_image = Image.new('RGB', pil_image.size, (255, 255, 255))
+                rgb_image.paste(pil_image, mask=pil_image.split()[3] if len(pil_image.split()) == 4 else None)
+                pil_image = rgb_image
+            elif pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+            # PIL画像をnumpy配列に変換（RGB形式）
+            image = np.array(pil_image)
             
             log_info("OCR処理を開始しています...")
             
