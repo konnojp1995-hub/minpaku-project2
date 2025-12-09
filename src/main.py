@@ -1402,10 +1402,10 @@ def simulation_tab():
                     del st.session_state[cache_key_initial_costs]
                 st.rerun()
         
-        deposit = st.number_input("敷金", value=default_initial_costs.get('deposit', 0), step=10000)
-        key_money = st.number_input("礼金", value=default_initial_costs.get('key_money', 0), step=10000)
-        brokerage_fee = st.number_input("仲介手数料", value=default_initial_costs.get('brokerage_fee', 0), step=10000)
-        guarantee_company = st.number_input("保証会社", value=default_initial_costs.get('guarantee_company', 0), step=10000)
+        deposit = st.number_input("敷金（円）", value=default_initial_costs.get('deposit', 0), step=10000, min_value=0, format="%d")
+        key_money = st.number_input("礼金（円）", value=default_initial_costs.get('key_money', 0), step=10000, min_value=0, format="%d")
+        brokerage_fee = st.number_input("仲介手数料（円）", value=default_initial_costs.get('brokerage_fee', 0), step=10000, min_value=0, format="%d")
+        guarantee_company = st.number_input("保証会社（円）", value=default_initial_costs.get('guarantee_company', 0), step=10000, min_value=0, format="%d")
         fire_insurance = st.number_input("火災保険", value=default_initial_costs.get('fire_insurance', 0), step=10000)
         fire_equipment = st.number_input("消防設備", value=default_initial_costs.get('fire_equipment', 0), step=10000)
         furniture = st.number_input("家具・家電購入費用", value=default_initial_costs.get('furniture', 0), step=100000)
