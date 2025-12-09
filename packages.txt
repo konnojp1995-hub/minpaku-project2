@@ -1,2 +1,0 @@
-# Streamlit Community Cloud system packages
-# Leave this file empty if no system packages are needed
