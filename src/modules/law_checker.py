@@ -41,48 +41,13 @@ class LawChecker:
             self.gemini_init_error = "Gemini APIキーが未設定です。サイドバーで設定してください。"
         else:
             self.gemini_available = True
-            try:
-                genai.configure(api_key=gemini_api_key)
-                # モデルを取得（タイムアウト設定）
-                try:
-                    import socket
-                    socket.setdefaulttimeout(30)  # 30秒タイムアウト
-                    models = list(genai.list_models())
-                    socket.setdefaulttimeout(None)  # タイムアウトをリセット
-                    available_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
-                except Exception as timeout_error:
-                    socket.setdefaulttimeout(None)  # タイムアウトをリセット
-                    # タイムアウトの場合、デフォルトモデルを使用
-                    if "timeout" in str(timeout_error).lower() or "Timeout" in str(timeout_error):
-                        log_warning("モデル一覧取得がタイムアウトしました。デフォルトモデルを使用します。")
-                        # デフォルトモデルを直接使用
-                        self.gemini_model = genai.GenerativeModel('gemini-1.5-pro')
-                        log_info("デフォルトモデル（gemini-1.5-pro）を使用して初期化しました")
-                        return
-                    else:
-                        raise
-                if available_models:
-                    # 優先順位でモデルを選択
-                    preferred = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-1.5-pro']
-                    selected = None
-                    for pref in preferred:
-                        for model in available_models:
-                            if pref in model:
-                                selected = model
-                                break
-                        if selected:
-                            break
-                    if not selected:
-                        selected = available_models[0]
-                    self.gemini_model = genai.GenerativeModel(selected)
-                else:
-                    self.gemini_available = False
-                    self.gemini_init_error = "利用可能なGeminiモデルが見つかりません"
-                    log_error("利用可能なGeminiモデルが見つかりません")
-            except Exception as e:
-                self.gemini_available = False
-                self.gemini_init_error = str(e)
-                log_error(f"Gemini初期化エラー: {str(e)}")
+            # genai.configure()とモデルの初期化は完全に遅延させる（実際にAPIを使用する時まで待つ）
+            # 起動時の不要なAPIコールを完全に避けるため、すべての初期化を遅延
+            self.gemini_api_key = gemini_api_key
+            self.gemini_model = None
+            self.gemini_model_name = None  # 使用するモデル名（遅延初期化時に決定）
+            self.gemini_init_error = ""
+            self._gemini_configured = False  # configure()が呼ばれたかどうか
     
     def _call_gemini(self, prompt: str) -> str:
         """
@@ -96,6 +61,34 @@ class LawChecker:
         """
         if not self.gemini_available:
             return "Gemini APIが利用できません"
+        
+        # genai.configure()とモデルの初期化を遅延させる（初回API呼び出し時まで待つ）
+        if not self._gemini_configured:
+            try:
+                # ロギングを抑制してモデル検索のログを非表示にする
+                import logging
+                logging.getLogger('google.generativeai').setLevel(logging.WARNING)
+                logging.getLogger('google.ai.generativelanguage').setLevel(logging.WARNING)
+                genai.configure(api_key=self.gemini_api_key)
+                self._gemini_configured = True
+            except Exception as e:
+                self.gemini_available = False
+                self.gemini_init_error = str(e)
+                log_error(f"Gemini初期化エラー: {str(e)}")
+                return f"エラー: {self.gemini_init_error}"
+        
+        if self.gemini_model is None:
+            # gemini-2.0-flashを固定値として使用（モデル検索を避けるため、直接モデル名を指定）
+            try:
+                # モデル名を明示的に指定（models/プレフィックス付き、位置引数で指定）
+                self.gemini_model = genai.GenerativeModel('models/gemini-2.0-flash')
+                self.gemini_model_name = 'gemini-2.0-flash'
+                log_info("Geminiモデルを初期化しました: gemini-2.0-flash")
+            except Exception as e:
+                self.gemini_available = False
+                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}"
+                log_error(self.gemini_init_error)
+                return f"エラー: {self.gemini_init_error}"
         
         try:
             response = self.gemini_model.generate_content(prompt)

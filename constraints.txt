@@ -1,0 +1,1 @@
+# OpenCVは使用しない（PIL/numpyで代替）

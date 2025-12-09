@@ -44,76 +44,12 @@ class AirbnbPriceEstimator:
             self.gemini_init_error = "Gemini APIキーが未設定です"
             self.gemini_available = False
         else:
-            try:
-                genai.configure(api_key=self.gemini_api_key)
-                
-                # 利用可能なモデルを取得してから初期化
-                try:
-                    available_models = [model.name for model in genai.list_models()]
-                    log_info(f"利用可能なGeminiモデル数: {len(available_models)}")
-                except Exception as list_error:
-                    log_warning(f"モデル一覧の取得に失敗: {str(list_error)}")
-                    available_models = []
-                
-                # 優先順位でモデルを選択（gemini-1.5-proを最優先）
-                # Google検索（google_search）機能に対応しているモデルを優先
-                # gemini-1.5-proはGoogle検索対応・安定版・高機能で、クォータ制限も比較的緩い
-                preferred_models = [
-                    'gemini-1.5-pro',       # 最優先：Google検索対応・安定版・高機能
-                    'gemini-1.5-flash',     # Google検索対応・軽量で高速
-                    'gemini-pro',           # 安定版フォールバック
-                    'gemini-2.0-flash',     # Google検索対応の可能性あり
-                    'gemini-2.0-flash-exp'  # Experimental（クォータ制限が厳しいため最後）
-                ]
-                
-                selected_model = None
-                for pref in preferred_models:
-                    # モデル名の完全一致または部分一致をチェック
-                    # gemini-1.5-proを厳密に優先するため、完全一致を優先
-                    for model_name in available_models:
-                        # 完全一致を優先（gemini-1.5-proを確実に選ぶ）
-                        if model_name.endswith(pref) or f'/{pref}' in model_name or model_name == pref:
-                            selected_model = model_name
-                            log_info(f"優先モデル '{pref}' が見つかりました: {selected_model}")
-                            break
-                        # 部分一致も確認
-                        elif pref in model_name:
-                            selected_model = model_name
-                            log_info(f"優先モデル '{pref}' が部分一致しました: {selected_model}")
-                            break
-                    if selected_model:
-                        break
-                
-                # モデルが見つからない場合はデフォルトを使用
-                if not selected_model:
-                    if available_models:
-                        selected_model = available_models[0]
-                        log_warning(f"優先モデルが見つかりません。最初の利用可能なモデルを使用: {selected_model}")
-                    else:
-                        # フォールバック: 一般的なモデル名を試行
-                        fallback_models = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-pro']
-                        for fallback in fallback_models:
-                            try:
-                                self.gemini_model = genai.GenerativeModel(fallback)
-                                selected_model = fallback
-                                log_info(f"フォールバックモデルを使用: {fallback}")
-                                break
-                            except Exception:
-                                continue
-                        if not selected_model:
-                            raise Exception("利用可能なGeminiモデルが見つかりません")
-                
-                if selected_model:
-                    # モデル名から '/models/' プレフィックスを除去（必要に応じて）
-                    model_name_clean = selected_model.replace('/models/', '') if '/models/' in selected_model else selected_model
-                    self.gemini_model = genai.GenerativeModel(model_name_clean)
-                    log_info(f"Geminiモデルを初期化しました: {model_name_clean}")
-                
-                self.gemini_init_error = ""
-            except Exception as e:
-                self.gemini_init_error = f"Gemini初期化エラー: {str(e)}"
-                self.gemini_available = False
-                log_error(f"Gemini初期化エラー: {str(e)}")
+            # genai.configure()とモデルの初期化は完全に遅延させる（実際にAPIを使用する時まで待つ）
+            # 起動時の不要なAPIコールを完全に避けるため、すべての初期化を遅延
+            self.gemini_model = None
+            self.gemini_model_name = None  # 使用するモデル名（遅延初期化時に決定）
+            self.gemini_init_error = ""
+            self._gemini_configured = False  # configure()が呼ばれたかどうか
     
     def _call_gemini(self, prompt: str, use_google_search: bool = False) -> Tuple[str, Optional[object]]:
         """
@@ -129,62 +65,80 @@ class AirbnbPriceEstimator:
         if not self.gemini_available:
             return ("Gemini APIが利用できません", None)
         
+        # genai.configure()とモデルの初期化を遅延させる（初回API呼び出し時まで待つ）
+        if not self._gemini_configured:
+            try:
+                # ロギングを抑制してモデル検索のログを非表示にする
+                import logging
+                logging.getLogger('google.generativeai').setLevel(logging.WARNING)
+                logging.getLogger('google.ai.generativelanguage').setLevel(logging.WARNING)
+                genai.configure(api_key=self.gemini_api_key)
+                self._gemini_configured = True
+            except Exception as e:
+                self.gemini_available = False
+                self.gemini_init_error = str(e)
+                log_error(f"Gemini初期化エラー: {str(e)}")
+                return (f"エラー: {self.gemini_init_error}", None)
+        
+        if self.gemini_model is None:
+            # gemini-2.0-flashを固定値として使用（モデル検索を避けるため、直接モデル名を指定）
+            try:
+                # モデル名を明示的に指定（models/プレフィックス付き、位置引数で指定）
+                self.gemini_model = genai.GenerativeModel('models/gemini-2.0-flash')
+                self.gemini_model_name = 'gemini-2.0-flash'
+                log_info("Geminiモデルを初期化しました: gemini-2.0-flash")
+            except Exception as e:
+                self.gemini_available = False
+                self.gemini_init_error = f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}"
+                log_error(self.gemini_init_error)
+                return (f"エラー: {self.gemini_init_error}", None)
+        
         try:
             tools_config = None
             if use_google_search:
                 log_info("Google検索によるグラウンディング機能を使用して、Airbnb公式サイトの公開情報を検索します")
                 
-                # Google Search groundingを有効化（以前動作していた方法を実装）
+                # Google Search groundingを有効化（1回のみ試行してAPIコールを削減）
                 try:
                     log_info("Google検索ツールを有効化します...")
                     response_obj = None
                     
-                    # 方法1: protos形式（以前動作していた方法）
+                    # クォータ制限エラーをチェックするためのフラグ
+                    quota_error_detected = False
+                    
+                    # 方法1: 辞書形式を最初に試行（最も一般的な方法）
                     try:
-                        import google.generativeai.protos as protos
                         tools_config = [
-                            protos.Tool(google_search=protos.Tool.GoogleSearch())
+                            {
+                                "google_search": {}
+                            }
                         ]
                         response_obj = self.gemini_model.generate_content(
                             prompt,
                             tools=tools_config
                         )
-                        log_info("✅ Google検索によるグラウンディング機能を使用しました（protos形式）")
+                        log_info("✅ Google検索によるグラウンディング機能を使用しました（辞書形式）")
                     except Exception as e1:
-                        log_warning(f"protos形式が失敗しました: {str(e1)}")
-                        # 方法2: 辞書形式（以前動作していた方法）
-                        try:
-                            tools_config = [
-                                {
-                                    "google_search": {}
-                                }
-                            ]
-                            response_obj = self.gemini_model.generate_content(
-                                prompt,
-                                tools=tools_config
-                            )
-                            log_info("✅ Google検索によるグラウンディング機能を使用しました（辞書形式）")
-                        except Exception as e2:
-                            log_warning(f"辞書形式が失敗しました: {str(e2)}")
-                            # 方法3: 文字列形式（フォールバック）
-                            try:
-                                tools_config = ["google_search"]
-                                response_obj = self.gemini_model.generate_content(
-                                    prompt,
-                                    tools=tools_config
-                                )
-                                log_info("✅ Google検索によるグラウンディング機能を使用しました（文字列形式）")
-                            except Exception as e3:
-                                log_warning(f"文字列形式も失敗しました: {str(e3)}")
-                                # 通常モードで実行
-                                log_info("通常モードで実行します")
-                                response_obj = self.gemini_model.generate_content(prompt)
+                        error_str = str(e1)
+                        # クォータ制限エラーの場合は再試行しない
+                        if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                            quota_error_detected = True
+                            log_warning(f"⚠️ Gemini APIのクォータ制限に達しました: {error_str}")
+                            raise  # エラーを再発生させて、呼び出し元で処理
+                        log_warning(f"辞書形式が失敗しました: {error_str}")
+                        # 通常モードで実行（1回のみ）
+                        log_info("通常モードで実行します")
+                        response_obj = self.gemini_model.generate_content(prompt)
                     
-                    if response_obj is None:
+                    if response_obj is None and not quota_error_detected:
                         response_obj = self.gemini_model.generate_content(prompt)
                         
                 except Exception as e:
-                    log_warning(f"Google検索ツールの設定に失敗しました。通常モードで実行します: {str(e)}")
+                    error_str = str(e)
+                    # クォータ制限エラーの場合は再試行しない
+                    if "429" in error_str or "quota" in error_str.lower() or "rate" in error_str.lower():
+                        raise  # エラーを再発生させて、呼び出し元で処理
+                    log_warning(f"Google検索ツールの設定に失敗しました。通常モードで実行します: {error_str}")
                     response_obj = self.gemini_model.generate_content(prompt)
             else:
                 response_obj = self.gemini_model.generate_content(prompt)
@@ -629,7 +583,21 @@ class AirbnbPriceEstimator:
                         response_preview = response[:500] if len(response) > 500 else response
                         log_info(f"🔍 Geminiレスポンス（{search_level}レベル）プレビュー: {response_preview}...")
                     
+                    # クォータ制限エラー（429）の場合は再試行しない
+                    is_quota_error = "429" in str(response) or "quota" in str(response).lower() or "rate" in str(response).lower() or "クォータ" in str(response)
+                    
                     if not response or response.startswith("エラー") or response == "Gemini APIが利用できません":
+                        # クォータ制限エラーの場合は即座に終了
+                        if is_quota_error:
+                            return {
+                                'success': False,
+                                'error': response,
+                                'average_price_median': None,
+                                'price_range': None,
+                                'property_count': None,
+                                'popularity_memo': None
+                            }
+                        # その他のエラーの場合のみ再試行
                         if retry_count < max_retries - 1:
                             retry_count += 1
                             continue

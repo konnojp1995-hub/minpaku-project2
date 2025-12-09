@@ -10,10 +10,7 @@ from typing import List, Dict, Optional
 import streamlit as st
 from .utils import validate_file_size, log_error, log_info, log_warning
 
-# cv2のインポートは削除（Streamlit Cloudでネイティブライブラリの読み込みに失敗するため）
-# すべての画像処理はPIL/numpyで行う
-CV2_AVAILABLE = False
-cv2 = None
+# すべての画像処理はPIL/numpyで行う（OpenCVは使用しない）
 
 # OpenAIは使用しない（Geminiのみ使用）
 
@@ -44,8 +41,8 @@ class OCRAddressExtractor:
         self.gemini_available = GEMINI_AVAILABLE
         self.ocr_mode = "gemini"  # Geminiのみ使用
         self.gemini_api_key = gemini_api_key
-        # 任意のモデル上書き（環境変数）
-        self.gemini_model_name = os.getenv('GEMINI_MODEL', '').strip()
+        # gemini-2.0-flashを固定値として使用
+        self.gemini_model_name = 'gemini-2.0-flash'
         
         # Geminiクライアントを初期化
         self.gemini_init_error = ""
@@ -66,18 +63,7 @@ class OCRAddressExtractor:
                 # genai.configure()とモデルの初期化は完全に遅延させる（実際にAPIを使用する時まで待つ）
                 # 起動時の不要なAPIコールを完全に避けるため、すべての初期化を遅延
                 self.gemini_model = None
-                # gemini_model_nameは環境変数から取得（既に設定されている）
                 self._gemini_configured = False  # configure()が呼ばれたかどうか
-                        for fallback in fallback_models:
-                            try:
-                                self.gemini_model = genai.GenerativeModel(fallback)
-                                log_info(f"フォールバック成功: {fallback}")
-                                model_name = fallback
-                                break
-                            except Exception as fallback_error:
-                                log_warning(f"フォールバック '{fallback}' も失敗: {str(fallback_error)}")
-                        else:
-                            raise model_error  # 全てのフォールバックが失敗した場合
             except Exception as e:
                 self.gemini_init_error = str(e)
                 log_error(f"Geminiの初期化に失敗しました: {self.gemini_init_error}")
@@ -114,11 +100,15 @@ class OCRAddressExtractor:
         if not self.gemini_available or not self.gemini_api_key:
             return []
         
-        # cv2が利用できない場合でも処理を続行（画像は既にRGB形式であると仮定）
+        # 画像は既にRGB形式であると仮定（PILで読み込んでいるため）
         
         # genai.configure()とモデルの初期化を遅延させる（初回API呼び出し時まで待つ）
         if not self._gemini_configured:
             try:
+                # ロギングを抑制してモデル検索のログを非表示にする
+                import logging
+                logging.getLogger('google.generativeai').setLevel(logging.WARNING)
+                logging.getLogger('google.ai.generativelanguage').setLevel(logging.WARNING)
                 genai.configure(api_key=self.gemini_api_key)
                 self._gemini_configured = True
             except Exception as e:
@@ -128,44 +118,15 @@ class OCRAddressExtractor:
                 return []
         
         if self.gemini_model is None:
-            model_name = self.gemini_model_name or 'gemini-1.5-pro'
-            
-            # 優先順位でモデルを選択（軽量モデルを優先、OCR用）
-            preferred_models = [
-                'gemini-1.5-pro',        # 最優先：安定版・高機能・画像処理対応
-                'gemini-1.5-flash',      # 軽量で高速・画像処理対応
-                'gemini-2.5-pro',        # 高機能版
-                'gemini-2.5-flash',      # 軽量版
-                'gemini-2.0-flash',      # 軽量版
-                'gemini-1.0-pro-vision', # 画像処理専用
-                'gemini-pro-vision'      # 画像処理専用
-            ]
-            
-            selected_model = None
-            for preferred in preferred_models:
-                try:
-                    self.gemini_model = genai.GenerativeModel(preferred)
-                    selected_model = preferred
-                    self.gemini_model_name = preferred
-                    log_info(f"Geminiクライアントを初期化しました: {preferred}")
-                    break
-                except Exception as model_error:
-                    # クォータエラーの場合は即座に終了
-                    if "429" in str(model_error) or "quota" in str(model_error).lower():
-                        log_error(f"Gemini APIのクォータ制限に達しています: {str(model_error)}")
-                        return []
-                    continue
-            
-            if not selected_model:
-                # フォールバック: 環境変数で指定されたモデルまたはデフォルトを試行
-                try:
-                    self.gemini_model = genai.GenerativeModel(model_name)
-                    selected_model = model_name
-                    self.gemini_model_name = model_name
-                    log_info(f"デフォルトモデル（{model_name}）を使用して初期化しました")
-                except Exception as e:
-                    log_error(f"モデル '{model_name}' の初期化に失敗: {str(e)}")
-                    return []
+            # gemini-2.0-flashを固定値として使用（モデル検索を避けるため、直接モデル名を指定）
+            try:
+                # モデル名を明示的に指定（models/プレフィックス付き、位置引数で指定）
+                self.gemini_model = genai.GenerativeModel('models/gemini-2.0-flash')
+                self.gemini_model_name = 'gemini-2.0-flash'
+                log_info("Geminiクライアントを初期化しました: gemini-2.0-flash")
+            except Exception as e:
+                log_error(f"Geminiモデル（gemini-2.0-flash）の初期化に失敗: {str(e)}")
+                return []
         
         try:
             # numpy配列をPIL画像に変換（画像は既にRGB形式であると仮定）
@@ -493,7 +454,7 @@ class OCRAddressExtractor:
                     'addresses': []
                 }
             
-            # 画像読み込み（PILを使用、cv2は不要）
+            # 画像読み込み（PILを使用）
             try:
                 # PILで画像を読み込み（RGB形式）
                 pil_image = Image.open(image_path)

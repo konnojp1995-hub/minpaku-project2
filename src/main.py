@@ -441,7 +441,7 @@ def chat_bot_tab():
             image = Image.open(uploaded_file)
             with st.chat_message("assistant"):
                 st.write("📷 アップロードされた画像を確認してください。")
-                st.image(image, caption="アップロードされた画像", use_column_width=True)
+                st.image(image, caption="アップロードされた画像", width=None)
                 st.session_state['uploaded_image'] = image
         else:
             with st.chat_message("assistant"):
@@ -1218,6 +1218,17 @@ def simulation_tab():
     
     # エラー情報を保存するための変数（ログ表示領域に表示するため）
     operating_costs_errors = []
+    
+    # 宿泊人数を計算（面積から）- 運用費用計算でも使用
+    occupancy = 2  # デフォルト
+    if area:
+        occupancy = max(1, min(10, round(area / 12)))
+    
+    # 間取り情報を取得（OCRテキストから抽出を試みる）
+    layout = property_info.get('間取り', '')
+    if not layout:
+        # 間取り情報が取得できない場合は階数情報を使用
+        layout = property_info.get('階数', '')
     
     # キャッシュから取得または計算
     if cache_key_operating_costs not in st.session_state:
