@@ -42,10 +42,13 @@ class InitialCostEstimator:
         if raw_value is None:
             return 0
         try:
+            value_str = str(raw_value).strip()
+            # 「なし」「無し」「0円」などは0扱い
+            if value_str in ["なし", "無し", "0", "0円", "なし。", "無し。"]:
+                return 0
             # すでに数値の場合
             if isinstance(raw_value, (int, float)):
                 return int(raw_value)
-            value_str = str(raw_value).strip()
             # 例: "2ヶ月", "1.5か月", "3ヵ月", "2月分"
             month_match = re.search(r'([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', value_str)
             if month_match and rent_value > 0:
@@ -218,10 +221,11 @@ JSON形式で、以下の構造で返してください:
                 except:
                     pass
         
-        # 保証会社のパターン
+        # 保証会社 / 保証金のパターン
         guarantee_patterns = [
             r'保証[会社]*[：:]\s*([0-9,]+)',
-            r'保証会社\s*([0-9,]+)'
+            r'保証会社\s*([0-9,]+)',
+            r'保証金[：:]\s*([0-9,]+)'
         ]
         for pattern in guarantee_patterns:
             match = re.search(pattern, text)
@@ -232,11 +236,20 @@ JSON形式で、以下の構造で返してください:
                 except:
                     pass
         if result['guarantee_company'] == 0 and rent_value > 0:
-            month_match = re.search(r'保証会社[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
+            month_match = re.search(r'保証(会社|金)?[：:\s]*([0-9]+(?:\.[0-9]+)?)\s*[ヶ月か月ヵ月月分]', text)
             if month_match:
                 try:
-                    months = float(month_match.group(1))
+                    months = float(month_match.group(2))
                     result['guarantee_company'] = int(round(months * rent_value))
+                except:
+                    pass
+        # 「初回保証料:月額総賃料50%」などの割合指定
+        if result['guarantee_company'] == 0 and rent_value > 0:
+            percent_match = re.search(r'初回保証料[:：]?\s*月額総賃料\s*([0-9]+)\s*%?', text)
+            if percent_match:
+                try:
+                    pct = float(percent_match.group(1))
+                    result['guarantee_company'] = int(round(rent_value * pct / 100.0))
                 except:
                     pass
         
@@ -256,6 +269,59 @@ JSON形式で、以下の構造で返してください:
                     pass
         
         return result
+
+    def extract_rent_from_ocr(self, extracted_text: str) -> Dict:
+        """
+        OCRテキストから家賃と管理費を抽出（Gemini + 正規表現フォールバック）
+        """
+        if not extracted_text:
+            return {'rent': 0, 'management_fee': 0}
+        
+        # まずGeminiで抽出
+        if self.law_checker and self.law_checker.gemini_available:
+            prompt = f"""以下の不動産広告のテキストから、家賃と管理費を抽出してJSON形式で返してください。
+各項目が見つからない場合は、該当する項目を0として返してください。
+
+抽出テキスト:
+{extracted_text}
+
+抽出項目:
+- 家賃: 月額家賃の金額（数値のみ、単位なし。見つからない場合は0）
+- 管理費: 月額管理費の金額（数値のみ、単位なし。見つからない場合は0）
+
+JSON形式で、以下の構造で返してください:
+{{
+  "家賃": 0,
+  "管理費": 0
+}}
+
+数値のみを返してください。JSONのみを返してください。"""
+            try:
+                response_text = self.law_checker._call_gemini(prompt)
+                json_match = re.search(r'\{[^}]+\}', response_text, re.DOTALL)
+                if json_match:
+                    cost_data = json.loads(json_match.group())
+                    rent_val = int(cost_data.get('家賃', 0) or 0)
+                    mgmt_val = int(cost_data.get('管理費', 0) or 0)
+                    if rent_val or mgmt_val:
+                        return {'rent': rent_val, 'management_fee': mgmt_val}
+            except Exception as e:
+                log_error(f"OCRテキストからの家賃抽出エラー: {str(e)}")
+        
+        # フォールバック: 正規表現で抽出
+        rent_val = 0
+        mgmt_val = 0
+        try:
+            rent_match = re.search(r'(賃料|家賃)[：:\s]*([0-9,]+)', extracted_text)
+            if rent_match:
+                rent_val = int(rent_match.group(2).replace(',', ''))
+            mgmt_match = re.search(r'(管理費|共益費)[：:\s]*([0-9,]+)', extracted_text)
+            if mgmt_match:
+                mgmt_val = int(mgmt_match.group(2).replace(',', ''))
+        except Exception:
+            pass
+        
+        return {'rent': rent_val, 'management_fee': mgmt_val}
     
     def estimate_fire_equipment_cost(self, fire_law_result: Optional[Dict] = None) -> Dict:
         """
