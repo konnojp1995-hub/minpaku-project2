@@ -1,11 +1,7 @@
 [server]
-# 外部からのアクセスを許可する場合に設定
-# address = "0.0.0.0"  # すべてのネットワークインターフェースでリッスン
-port = 8501
+headless = true
 enableCORS = false
 enableXsrfProtection = true
 
 [browser]
-# ブラウザで開く際のURL（ngrok使用時などで変更可能）
-serverAddress = "localhost"
-gatherUsageStats = true
+gatherUsageStats = false
